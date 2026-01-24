@@ -30,6 +30,37 @@ function generateOTP() {
 // Replace with env variable in real apps
 const JWT_SECRET = "Y4v@tq9!uLz$B8wXp7*MnJ2#KpVc8HdQ";
 
+router.delete("/:postId", async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const { userId } = req.body; // Pass userId in body to verify ownership
+
+    const post = await Post.findById(postId);
+
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+
+    // Safety Check: Only the author can delete the post
+    // If you want the Group Leader to delete posts too, add: || post.groupId.creator === userId
+    if (post.author.toString() !== userId) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Unauthorized: You can only delete your own posts" 
+      });
+    }
+
+    await Post.findByIdAndDelete(postId);
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Post deleted successfully" 
+    });
+  } catch (error) {
+    console.error("DELETE POST ERROR:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+});
 
 
 
@@ -126,24 +157,46 @@ router.post("/posts/like", async (req, res) => {
   }
 });
 
-// GET POSTS FOR GROUP
+// GET POSTS FOR GROUP (Filtered by Block List)
 router.get("/:groupId/posts", async (req, res) => {
   try {
     const { groupId } = req.params;
+    const { userId } = req.query;
 
-    // FIX: If groupId is undefined or not a valid ID, return 400 instead of crashing with 500
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
       return res.status(400).json({ success: false, message: "Invalid ID format" });
     }
 
-    const posts = await Post.find({ groupId: groupId })
+    let blockedUsers = [];
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      const user = await User.findById(userId);
+      blockedUsers = user?.blockedUsers || [];
+    }
+
+    const posts = await Post.find({ 
+        groupId: groupId,
+        author: { $nin: blockedUsers } 
+      })
       .populate('author', 'name profileImage')
-      .populate('comments.user', 'name profileImage')
+      // --- UPDATE THIS SECTION ---
+      .populate({
+        path: 'comments.user',
+        select: 'name profileImage',
+        match: { _id: { $nin: blockedUsers } } // Only populate if user is NOT blocked
+      })
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, posts });
+    // Important: Mongoose 'match' in populate will return null for comments.user 
+    // if the user is blocked. We should filter those out of the array before sending.
+    const filteredPosts = posts.map(post => {
+      const postObj = post.toObject();
+      postObj.comments = postObj.comments.filter(comment => comment.user !== null);
+      return postObj;
+    });
+
+    res.status(200).json({ success: true, posts: filteredPosts });
   } catch (error) {
-    console.error(error); // This lets you see the error in your terminal
+    console.error("Fetch Posts Error:", error);
     res.status(500).json({ success: false, message: "Database error" });
   }
 });
@@ -200,6 +253,52 @@ router.post("/posts/comment", async (req, res) => {
   } catch (error) {
     console.error("Comment Error:", error);
     res.status(500).json({ success: false, message: "Error adding comment" });
+  }
+});
+
+
+router.delete("/:postId/comments/:commentId", async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const { userId } = req.body; // Sent from frontend to verify ownership
+
+    // 1. Find the post
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+
+    // 2. Locate the specific comment subdocument
+    const comment = post.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({ success: false, message: "Comment not found" });
+    }
+
+    // 3. Authorization Check
+    // We compare strings to be safe. Only the comment owner can delete.
+    if (comment.user.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: "Unauthorized: Ownership mismatch" });
+    }
+
+    // 4. Pull the comment from the array
+    post.comments.pull(commentId);
+    await post.save();
+
+    // 5. Populate the post exactly like your 'post/comment' route
+    // This maintains the 'name' and 'profileImage' for the remaining comments in your UI
+    const updatedPost = await Post.findById(postId)
+      .populate('comments.user', 'name profileImage')
+      .populate('author', 'name');
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Comment deleted", 
+      post: updatedPost 
+    });
+
+  } catch (error) {
+    console.error("Delete Comment Error:", error);
+    res.status(500).json({ success: false, message: "Error deleting comment", error: error.message });
   }
 });
 

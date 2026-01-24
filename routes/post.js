@@ -290,6 +290,10 @@ router.get("/group-details/:id", async (req, res) => {
   }
 });
 
+// router.delete("/posts/:postId", async (req, res) => ...
+
+
+
 router.post("/toggle-membership", async (req, res) => {
   try {
     const { groupId, userEmail } = req.body; 
