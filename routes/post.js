@@ -111,70 +111,239 @@ router.post("/create-group", upload.single("profilePicture"), async (req, res) =
 });
 
 
-// GET the 10 most recent groups
+// GET the 10 most recent groups (Filtering out blocked users & their comments)
 router.get("/latest-groups", async (req, res) => {
   try {
-    // 1. Find all groups
-    // 2. Sort by 'createdAt' in descending order (-1)
-    // 3. Limit the results to 10
-    const latestGroups = await Group.find()
-      .sort({ createdAt: -1 }) 
+    const { userId } = req.query;
+
+    let blockedList = [];
+
+    if (userId && userId !== 'null') {
+      const user = await User.findById(userId);
+      if (user && user.blockedUsers) {
+        // Convert IDs to strings for easy comparison later
+        blockedList = user.blockedUsers.map(id => id.toString());
+      }
+    }
+
+    const latestGroups = await Group.find({
+      creator: { $nin: blockedList } 
+    })
+      .sort({ createdAt: -1 })
       .limit(10)
-      .populate("creator", "name profilePicture"); // Optional: Pull in creator details
+      .populate("creator", "name profilePicture category")
+      .populate("comments.user", "name profileImage");
+
+    // --- LOGIC TO REMOVE BLOCKED COMMENTS ---
+    const cleanedGroups = latestGroups.map(group => {
+      const g = group.toObject(); // Convert Mongoose document to plain JS object
+      
+      if (g.comments && g.comments.length > 0) {
+        g.comments = g.comments.filter(comment => {
+          // Handle cases where user might be populated or just an ID
+          const commentAuthorId = comment.user?._id?.toString() || comment.user?.toString();
+          
+          // Return true only if the author is NOT in the blocked list
+          return !blockedList.includes(commentAuthorId);
+        });
+      }
+      return g;
+    });
 
     res.status(200).json({
       success: true,
-      count: latestGroups.length,
-      groups: latestGroups
+      count: cleanedGroups.length,
+      groups: cleanedGroups // Send the cleaned data
     });
   } catch (error) {
     console.error("Fetch Latest Groups Error:", error);
     res.status(500).json({ 
-      message: "Internal server error", 
-      error: error.message 
+      success: false,
+      message: "Internal server error" 
     });
   }
 });
 
+
+
+
+// POST /api/groups/:id/like
+router.post("/:id/like", async (req, res) => {
+  try {
+    const groupId = req.params.id;
+    // SINCE NO MIDDLEWARE: Get userId sent from the frontend body
+    const { userId } = req.body; 
+
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "User ID is required in the request body" 
+      });
+    }
+
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    // Initialize likes array if it's missing
+    if (!group.likes) group.likes = [];
+
+    // Check if user already liked it (compare as Strings)
+    const isLiked = group.likes.some(id => id.toString() === userId.toString());
+
+    if (!isLiked) {
+      // Add like
+      group.likes.push(userId);
+    } else {
+      // Remove like (Unlike)
+      group.likes = group.likes.filter(id => id.toString() !== userId.toString());
+    }
+
+    await group.save();
+
+    res.status(200).json({ 
+      success: true, 
+      likesCount: group.likes.length,
+      likes: group.likes 
+    });
+
+  } catch (error) {
+    console.error("Like Route Error:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+});
+
+
+
+
+
+
+
+
+// COMMENT on a group
+
+router.post("/posthome/:id/comment", async (req, res) => {
+  try {
+    const { text, userId } = req.body; 
+    
+    const group = await Group.findById(req.params.id);
+    if (!group) return res.status(404).json({ success: false, message: "Group not found" });
+
+    const newComment = {
+      user: userId, 
+      text: text,
+      createdAt: new Date()
+    };
+
+    group.comments.unshift(newComment); 
+    await group.save();
+
+    // 1. Get the current user to find who they blocked
+    const currentUser = await User.findById(userId);
+    const blockedList = currentUser?.blockedUsers?.map(id => id.toString()) || [];
+
+    // 2. Populate and filter out blocked comments immediately
+    const updatedGroup = await Group.findById(req.params.id)
+      .populate("creator", "name profilePicture category")
+      .populate("comments.user", "name profileImage");
+
+    const groupObj = updatedGroup.toObject();
+    if (groupObj.comments) {
+      groupObj.comments = groupObj.comments.filter(c => {
+        const authorId = c.user?._id?.toString() || c.user?.toString();
+        return !blockedList.includes(authorId);
+      });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      post: groupObj 
+    });
+  } catch (error) {
+    console.error("Comment Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+// DELETE COMMENT ROUTE
+router.delete("/posthome/:id/comment/:commentId", async (req, res) => {
+  try {
+    const { userId } = req.body; 
+    const { id, commentId } = req.params;
+
+    const group = await Group.findById(id);
+    if (!group) return res.status(404).json({ success: false, message: "Group not found" });
+
+    // Remove the comment
+    group.comments.pull(commentId);
+    await group.save();
+
+    // Populate so the frontend gets updated names/images
+    const updatedGroup = await Group.findById(id)
+      .populate("creator", "name profilePicture category")
+      .populate("comments.user", "name profileImage");
+
+    res.status(200).json({ success: true, post: updatedGroup });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 // backend/routes/group.js
+
+
 router.get("/all-groups", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const { category, search } = req.query;
+    const { category, search, userId, page = 1, limit = 10 } = req.query;
+    let blockedList = [];
 
-    let query = {};
-
-    // CATEGORY FILTER: Matches exactly (e.g., "Technology")
-    if (category && category !== 'All') {
-      query.category = category;
+    // 1. Get the current user's block list
+    if (userId && userId !== 'null') {
+      const user = await User.findById(userId);
+      if (user) blockedList = user.blockedUsers || [];
     }
 
-    // DEEP SEARCH: Looks for the search string anywhere inside the name
-    if (search) {
-      query.name = { $regex: search, $options: 'i' }; 
-    }
+    // 2. Filter Groups: Hide groups created by blocked users
+    let query = {
+      creator: { $nin: blockedList } 
+    };
+
+    if (category && category !== 'All') query.category = category;
+    if (search) query.name = { $regex: search, $options: 'i' };
 
     const skip = (page - 1) * limit;
 
     const groups = await Group.find(query)
-      .sort({ memberCount: -1 }) // Shows most popular search results first
+      .sort({ memberCount: -1 })
       .skip(skip)
       .limit(limit)
-      .populate("creator", "name profilePicture");
+      .populate("creator", "name profilePicture")
+      .populate("comments.user", "name profileImage");
+
+    // 3. Filter Comments: Remove comments inside the group from blocked users
+    const filteredGroups = groups.map(group => {
+      const g = group.toObject();
+      if (g.comments) {
+        g.comments = g.comments.filter(c => {
+          const authorId = c.user?._id || c.user;
+          return !blockedList.map(id => id.toString()).includes(authorId?.toString());
+        });
+      }
+      return g;
+    });
 
     const totalGroups = await Group.countDocuments(query);
 
     res.status(200).json({
       success: true,
       totalPages: Math.ceil(totalGroups / limit),
-      currentPage: page,
-      groups
+      groups: filteredGroups 
     });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching groups", error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
 
 router.put("/update-privacy", async (req, res) => {
   try {

@@ -19,10 +19,13 @@ function generateResetCode() {
   return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
 }
 
-// Sign Up
+
+
+
 router.post("/signup", async (req, res) => {
   let { name, email, password, confirmpassword } = req.body;
-console.log("Hiiii")
+  console.log("Hiiii");
+
   try {
     // 1. Check if passwords match
     if (password !== confirmpassword) {
@@ -51,15 +54,45 @@ console.log("Hiiii")
       password: hashedpassword 
     });
 
-    res.status(201).json({ message: "User created", user });
+    // 5. Generate JWT token
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        profileimage: user.profileImage,
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    // 6. Return response with token and user data
+    res.status(201).json({ 
+      success: true,
+      message: "User created", 
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        isProfileComplete: user.isProfileComplete || false,
+      }
+    });
+
   } catch (err) {
     // Check if it's a MongoDB duplicate key error (code 11000)
     if (err.code === 11000) {
       return res.status(400).json({ error: "email already exists." });
     }
+    console.error("Signup Error:", err);
     res.status(400).json({ error: "Invalid data provided." });
   }
 });
+
+
+
+
+
 // Login
 router.post("/login", async (req, res) => {
   let { email, password } = req.body;

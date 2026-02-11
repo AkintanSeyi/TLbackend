@@ -7,6 +7,12 @@ const groupSchema = new mongoose.Schema({
     trim: true,
     maxlength: [50, "Name cannot exceed 50 characters"]
   },
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+comments: [{
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+}],
   description: { 
     type: String, 
     default: "", 
