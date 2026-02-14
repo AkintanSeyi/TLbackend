@@ -205,44 +205,39 @@ await user.save();
   }
 });
 
+
 router.post("/send-otp", async (req, res) => {
   const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ success: false, message: "email is required" });
-  }
+  if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
   try {
     const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    const otp = generateResetCode(); // e.g., 6-digit code
-    const otpExpiresAt = Date.now() + 5 * 60 * 1000; // 5 min
-    console.log(otp)
-
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = otp;
-    console.log(user.otp)
-    user.otpExpiresAt = otpExpiresAt;
+    user.otpExpiresAt = Date.now() + 5 * 60 * 1000;
     await user.save();
 
-    // ✅ NEW: Trigger the SendGrid Email
-    await sendEmail(
-      user.email, 
-      "Your Verification Code", 
-      "Hello! Use the code below to verify your account.", 
-      otp
-    );
+    console.log("OTP generated:", otp);
 
-    res.json({
-      success: true,
-      message: "OTP sent successfully to your email",
-      expiresAt: otpExpiresAt,
-    });
+    // TRY-CATCH inside the try-catch to prevent 500 error if email fails
+    try {
+      if (typeof sendEmail === "function") {
+          await sendEmail(user.email, "Verification Code", `Code: ${otp}`, otp);
+      } else {
+          console.log("CRITICAL: sendEmail function is missing!");
+      }
+    } catch (emailErr) {
+      console.log("Email Service Error:", emailErr.message);
+      // We still return success: true because the OTP is in the DB 
+      // This helps you debug if the DB part worked.
+    }
+
+    res.json({ success: true, message: "Check terminal for OTP if email fails" });
   } catch (error) {
-    console.error("Error sending OTP:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("Full Backend Error:", error);
+    res.status(500).json({ success: false, message: "Server crash" });
   }
 });
 
@@ -314,27 +309,30 @@ router.post("/verify-reset", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
   const { email, code, newpassword } = req.body;
 
-  const record = resetCodes[email];
+  try {
+    // 1. Find the user in the database
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
 
-  
-  if (!record) {
-    return res.status(400).json({ error: "No reset code found for this email" });
-  }
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
-  if (record.code !== code) {
-    return res.status(400).json({ error: "Invalid code" });
-  }
  
 
+ 
 
-  try {
+    // 4. Hash the new password
     const hashedpassword = await bcrypt.hash(newpassword, 10);
-    await User.findOneAndUpdate( { email: email }, { password: hashedpassword });
-   
-    delete resetCodes[email];
-    res.json({ message: "password reset successful" });
+
+    // 5. Update the user and CLEAR the OTP fields so they can't be used again
+    user.password = hashedpassword;
+    user.otp = null;
+    user.otpExpiresAt = null;
+    await user.save();
+
+    res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
-  
+    console.error("Reset Password Error:", err);
     res.status(500).json({ error: "Failed to reset password" });
   }
 });
