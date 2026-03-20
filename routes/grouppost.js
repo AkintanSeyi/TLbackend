@@ -10,6 +10,7 @@ const Group = require("../models/Group");
 const bcrypt = require("bcryptjs");
 const axios = require("axios");
 const nodemailer = require("nodemailer");
+const { RtcTokenBuilder, RtcRole } = require('agora-token');
 
 const Post = require('../models/Post');
 const jwt = require("jsonwebtoken");
@@ -351,7 +352,133 @@ router.get("/:id/analytics", async (req, res) => {
 });
 
 
+router.post("/:id/start-live", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
 
+    const group = await Group.findById(id);
+    if (!group) return res.status(404).json({ success: false, message: "Group not found" });
 
+    if (String(group.creator) !== String(userId)) {
+      return res.status(403).json({ success: false, message: "Only creators can start lives" });
+    }
+
+    // --- AGORA TOKEN CONFIGURATION ---
+    const appId = "3b55520bc2c74fdc9d90a84694a80002"; // Your App ID
+    const appCertificate = "d781166ae6c446fda30d0e901af13dfb"; 
+    const channelName = `channel_${id}`;
+    const uid = Math.floor(Math.random() * 100000); // Unique ID for this session
+    const role = RtcRole.PUBLISHER; // Creator is a publisher
+
+    const expirationTimeInSeconds = 3600; // Token valid for 1 hour
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+    // Generate the token
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      appId,
+      appCertificate,
+      channelName,
+      uid,
+      role,
+      privilegeExpiredTs
+    );
+    // ---------------------------------
+
+    group.isLive = true;
+    group.liveStreamId = channelName;
+    await group.save();
+
+    // Trigger Notifications (optional logic)
+    // sendLiveNotification(group.members, group.name);
+
+    res.status(200).json({ 
+      success: true, 
+      token, // This is the dynamic secure token
+      uid,   // Send the UID back so the frontend knows who it is
+      channelName: group.liveStreamId 
+    });
+  } catch (error) {
+    console.error("Token Error:", error);
+    res.status(500).json({ success: false, message: "Error starting live" });
+  }
+});
+
+// Assuming this is in your groups router file
+router.post("/:id/stop-live", async (req, res) => {
+  try {
+    const { id } = req.params; // The Group ID
+    const { userId } = req.body; // The Creator's ID
+
+    const group = await Group.findById(id);
+    
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    // Security check: Only the creator can toggle the live status to false
+    const creatorId = group.creator._id || group.creator;
+    if (String(creatorId) !== String(userId)) {
+      return res.status(403).json({ success: false, message: "Unauthorized: Only the creator can end the live" });
+    }
+
+    // Update the database state
+    group.isLive = false;
+    group.liveStreamId = ""; 
+    await group.save();
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Live stream status updated to offline" 
+    });
+  } catch (error) {
+    console.error("Stop Live Error:", error);
+    res.status(500).json({ success: false, message: "Error ending live" });
+  }
+});
+
+router.get("/my-live-groups", async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    // Find groups where the user is a member AND the group is live
+    const liveGroups = await Group.find({
+      "members.user": userId,
+      isLive: true
+    }).select("name profilePicture liveStreamId");
+
+    res.status(200).json({ success: true, liveGroups });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching live groups" });
+  }
+});
+
+router.get("/:id/join-live", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const group = await Group.findById(id);
+
+    if (!group || !group.isLive) {
+      return res.status(404).json({ success: false, message: "Stream not active" });
+    }
+
+    const appId = "3b55520bc2c74fdc9d90a84694a80002";
+    const appCertificate = "d781166ae6c446fda30d0e901af13dfb";
+    const channelName = group.liveStreamId; // Use the ID stored in DB
+    const uid = Math.floor(Math.random() * 100000); 
+    const role = RtcRole.SUBSCRIBER; // Audience role
+
+    const privilegeExpiredTs = Math.floor(Date.now() / 1000) + 3600;
+
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      appId, appCertificate, channelName, uid, role, privilegeExpiredTs
+    );
+
+    res.status(200).json({ success: true, token, uid, channelName });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error joining" });
+  }
+});
 
 module.exports = router;

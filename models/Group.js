@@ -58,6 +58,8 @@ comments: [{
     enum: ['free', 'one-time', 'subscription'], 
     default: 'free' 
   },
+  isLive: { type: Boolean, default: false },
+  liveStreamId: { type: String, default: "" },
 
   isPrivate: { type: Boolean, default: false },
   category: { type: String, default: "General" }
