@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema({
   agreedToTerms: { type: Boolean, default: false },
 
   // --- PUSH NOTIFICATIONS ---
- expoPushTokens: { 
+ expoPushToken: { 
   type: [String], 
   default: [] 
 }

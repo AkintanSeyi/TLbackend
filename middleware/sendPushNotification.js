@@ -18,7 +18,7 @@ const sendPushNotification = async (tokens, title, body, data = {}) => {
       body: body,
       data: data, // e.g., { type: 'chat', conversationId: '123' }
       priority: 'high',
-      channelId: 'default',
+      channelId: 'messages',
     });
   }
 

@@ -21,15 +21,28 @@ function generateResetCode() {
 
 
 // Route to save the push token to the user's document
+// router.js
 router.post("/update-push-token", async (req, res) => {
   const { userId, token } = req.body;
+  
+  console.log("Updating token for user:", userId, "Token:", token); // Log this!
 
   try {
-    await User.findByIdAndUpdate(userId, { expoPushToken: token });
-    res.status(200).json({ success: true, message: "Token updated successfully" });
+    // Force the update to the specific field 'expoPushToken'
+    const updatedUser = await User.findByIdAndUpdate(
+      userId, 
+      { $set: { expoPushToken: token } }, // Use $set to be safe
+      { new: true }
+    );
+    
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    res.status(200).json({ success: true, token: updatedUser.expoPushToken });
   } catch (err) {
-    console.error("Error updating token:", err);
-    res.status(500).json({ success: false, error: "Database update failed" });
+    console.error("DB Error:", err);
+    res.status(500).json({ success: false });
   }
 });
 

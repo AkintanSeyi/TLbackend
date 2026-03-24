@@ -50,39 +50,41 @@ router.post("/messages", upload.single('image'), async (req, res) => {
       status: 'sent'
     });
 
-    // Populate sender details for the UI and Notifications
+    // Populate sender details
     const populatedMessage = await newMessage.populate("sender", "name profileImage");
 
-    // 3. Update Conversation snippet (Last Message)
+    // 3. Update Conversation snippet
     const updatedConvo = await Conversation.findByIdAndUpdate(
       conversationId, 
       { lastMessage: newMessage._id },
       { new: true }
     );
 
-    // 4. Emit to Socket for real-time UI update
+    // 4. Emit to Socket
     if (req.io) {
       req.io.to(conversationId).emit("receive_message", populatedMessage);
     }
 
-    // 5. 🚀 HANDLE PUSH NOTIFICATIONS
-    if (updatedConvo) {
-      // Find participants who are NOT the sender
+    // 5. 🚀 FIXED PUSH NOTIFICATION LOGIC
+    if (updatedConvo && updatedConvo.participants) {
+      // Filter out the sender
       const recipientIds = updatedConvo.participants.filter(
         (id) => id.toString() !== senderId.toString()
       );
 
-      // Fetch recipient tokens from DB
+      // Fetch recipient users
       const recipients = await User.find({ _id: { $in: recipientIds } });
 
       recipients.forEach((recipient) => {
-        if (recipient.expoPushTokens && recipient.expoPushTokens.length > 0) {
+        // ✅ CHANGED: Using singular 'expoPushToken' (string) as per your DB
+        if (recipient.expoPushToken) { 
           const pushTitle = `New message from ${populatedMessage.sender.name}`;
           const pushBody = req.file ? "📷 Sent an image" : (text || "New message");
 
-          // Send the push (don't 'await' here to avoid blocking the response)
+          // ✅ FIX: Pass the single token inside an array [token] 
+          // because sendPushNotification expects an iterable list
           sendPushNotification(
-            recipient.expoPushTokens,
+            [recipient.expoPushToken], 
             pushTitle,
             pushBody,
             { 
@@ -90,7 +92,7 @@ router.post("/messages", upload.single('image'), async (req, res) => {
               conversationId, 
               senderName: populatedMessage.sender.name 
             }
-          ).catch(err => console.error("Push Error:", err));
+          ).catch(err => console.error("Push Notification Error:", err));
         }
       });
     }
