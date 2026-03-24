@@ -20,6 +20,18 @@ function generateResetCode() {
 }
 
 
+// Route to save the push token to the user's document
+router.post("/update-push-token", async (req, res) => {
+  const { userId, token } = req.body;
+
+  try {
+    await User.findByIdAndUpdate(userId, { expoPushToken: token });
+    res.status(200).json({ success: true, message: "Token updated successfully" });
+  } catch (err) {
+    console.error("Error updating token:", err);
+    res.status(500).json({ success: false, error: "Database update failed" });
+  }
+});
 
 
 router.post("/signup", async (req, res) => {

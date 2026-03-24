@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const upload = require("./../middleware/upload");
 const imagekit = require("../middleware/imagekit");
+const sendPushNotification = require("../middleware/sendPushNotification");
 const { sendEmail } = require("../middleware/sendemail"); 
 const Message = require("../models/Message")
 const Conversation = require("../models/Conversation")
@@ -25,14 +26,14 @@ function generateResetCode() {
 
 
 router.post("/messages", upload.single('image'), async (req, res) => {
-  const { conversationId, senderId, text, messageType } = req.body;
+  const { conversationId, senderId, text } = req.body;
   let fileUrl = null;
-console.log("Hiii", fileUrl)
+
   try {
-    // 1. Upload to ImageKit using Buffer (Same as Group logic)
+    // 1. Upload to ImageKit if a file exists
     if (req.file) {
       const uploadResult = await imagekit.upload({
-        file: req.file.buffer, // <--- The actual image data
+        file: req.file.buffer,
         fileName: `msg_${Date.now()}_${req.file.originalname}`,
         folder: "/chat_messages",
       });
@@ -49,21 +50,54 @@ console.log("Hiii", fileUrl)
       status: 'sent'
     });
 
+    // Populate sender details for the UI and Notifications
     const populatedMessage = await newMessage.populate("sender", "name profileImage");
 
-    // 3. Update Conversation snippet
-    await Conversation.findByIdAndUpdate(conversationId, {
-      lastMessage: newMessage._id
-    });
+    // 3. Update Conversation snippet (Last Message)
+    const updatedConvo = await Conversation.findByIdAndUpdate(
+      conversationId, 
+      { lastMessage: newMessage._id },
+      { new: true }
+    );
 
-    // 4. Emit to Socket
+    // 4. Emit to Socket for real-time UI update
     if (req.io) {
       req.io.to(conversationId).emit("receive_message", populatedMessage);
     }
 
+    // 5. 🚀 HANDLE PUSH NOTIFICATIONS
+    if (updatedConvo) {
+      // Find participants who are NOT the sender
+      const recipientIds = updatedConvo.participants.filter(
+        (id) => id.toString() !== senderId.toString()
+      );
+
+      // Fetch recipient tokens from DB
+      const recipients = await User.find({ _id: { $in: recipientIds } });
+
+      recipients.forEach((recipient) => {
+        if (recipient.expoPushTokens && recipient.expoPushTokens.length > 0) {
+          const pushTitle = `New message from ${populatedMessage.sender.name}`;
+          const pushBody = req.file ? "📷 Sent an image" : (text || "New message");
+
+          // Send the push (don't 'await' here to avoid blocking the response)
+          sendPushNotification(
+            recipient.expoPushTokens,
+            pushTitle,
+            pushBody,
+            { 
+              type: 'chat', 
+              conversationId, 
+              senderName: populatedMessage.sender.name 
+            }
+          ).catch(err => console.error("Push Error:", err));
+        }
+      });
+    }
+
     res.status(201).json(populatedMessage);
   } catch (err) {
-    console.error("Upload Error:", err);
+    console.error("Message Processing Error:", err);
     res.status(500).json({ error: "Failed to send message" });
   }
 });

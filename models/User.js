@@ -25,7 +25,10 @@ const userSchema = new mongoose.Schema({
   agreedToTerms: { type: Boolean, default: false },
 
   // --- PUSH NOTIFICATIONS ---
-  expoPushToken: { type: String, default: null }
+ expoPushTokens: { 
+  type: [String], 
+  default: [] 
+}
 }, { timestamps: true });
 
 // ✅ HELPER METHOD: Call this in your routes to check blocks easily

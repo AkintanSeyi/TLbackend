@@ -366,10 +366,10 @@ router.post("/:id/start-live", async (req, res) => {
 
     // --- AGORA TOKEN CONFIGURATION ---
     const appId = "3b55520bc2c74fdc9d90a84694a80002"; // Your App ID
-    const appCertificate = "d781166ae6c446fda30d0e901af13dfb"; 
+    const appCertificate = "e209b79c9bce4764a6c21c4b4353a41e"; 
     const channelName = `channel_${id}`;
     const uid = Math.floor(Math.random() * 100000); // Unique ID for this session
-    const role = RtcRole.PUBLISHER; // Creator is a publisher
+    const role = 1; // Creator is a publisher
 
     const expirationTimeInSeconds = 3600; // Token valid for 1 hour
     const currentTimestamp = Math.floor(Date.now() / 1000);
@@ -384,7 +384,7 @@ router.post("/:id/start-live", async (req, res) => {
       role,
       privilegeExpiredTs
     );
-    // ---------------------------------
+    // --------------------------------
 
     group.isLive = true;
     group.liveStreamId = channelName;
@@ -392,10 +392,10 @@ router.post("/:id/start-live", async (req, res) => {
 
     // Trigger Notifications (optional logic)
     // sendLiveNotification(group.members, group.name);
-
+console.log("Niceee")
     res.status(200).json({ 
       success: true, 
-      token, // This is the dynamic secure token
+      token, // This is the dynamic secure token 
       uid,   // Send the UID back so the frontend knows who it is
       channelName: group.liveStreamId 
     });
@@ -478,6 +478,28 @@ router.get("/:id/join-live", async (req, res) => {
     res.status(200).json({ success: true, token, uid, channelName });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error joining" });
+  }
+});
+
+router.get("/exploresteampage", async (req, res) => {
+  try {
+    const { category, page = 1, limit = 10 } = req.query;
+    let query = { isLive: true };
+    if (category && category !== 'All') query.category = category;
+console.log("Hiiiiiiiiii")
+    const groups = await Group.find(query)
+      .sort({ memberCount: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await Group.countDocuments(query);
+    res.status(200).json({ 
+      success: true, 
+      groups, 
+      hasMore: page * limit < total 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
