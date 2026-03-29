@@ -30,7 +30,7 @@ router.post("/messages", upload.single('image'), async (req, res) => {
   let fileUrl = null;
 
   try {
-    // 1. Upload to ImageKit if a file exists
+    // 1. Upload to ImageKit
     if (req.file) {
       const uploadResult = await imagekit.upload({
         file: req.file.buffer,
@@ -40,7 +40,7 @@ router.post("/messages", upload.single('image'), async (req, res) => {
       fileUrl = uploadResult.url;
     }
 
-    // 2. Save to Database
+    // 2. Save Message
     const newMessage = await Message.create({
       conversationId,
       sender: senderId,
@@ -50,41 +50,42 @@ router.post("/messages", upload.single('image'), async (req, res) => {
       status: 'sent'
     });
 
-    // Populate sender details
     const populatedMessage = await newMessage.populate("sender", "name profileImage");
 
-    // 3. Update Conversation snippet
+    // 3. Update Conversation
     const updatedConvo = await Conversation.findByIdAndUpdate(
       conversationId, 
       { lastMessage: newMessage._id },
       { new: true }
     );
 
-    // 4. Emit to Socket
+    // 4. Socket Emit
     if (req.io) {
       req.io.to(conversationId).emit("receive_message", populatedMessage);
     }
 
     // 5. 🚀 FIXED PUSH NOTIFICATION LOGIC
     if (updatedConvo && updatedConvo.participants) {
-      // Filter out the sender
       const recipientIds = updatedConvo.participants.filter(
         (id) => id.toString() !== senderId.toString()
       );
 
-      // Fetch recipient users
       const recipients = await User.find({ _id: { $in: recipientIds } });
 
       recipients.forEach((recipient) => {
-        // ✅ CHANGED: Using singular 'expoPushToken' (string) as per your DB
-        if (recipient.expoPushToken) { 
+        // Since your model is [String], we check if it exists and has length
+        if (recipient.expoPushToken && recipient.expoPushToken.length > 0) {
           const pushTitle = `New message from ${populatedMessage.sender.name}`;
           const pushBody = req.file ? "📷 Sent an image" : (text || "New message");
 
-          // ✅ FIX: Pass the single token inside an array [token] 
-          // because sendPushNotification expects an iterable list
+          // ✅ CLEAN FIX: Flatten the token array. 
+          // If your DB has ["Token1"], this ensures we pass ["Token1"] to the helper.
+          const finalTokens = Array.isArray(recipient.expoPushToken) 
+            ? recipient.expoPushToken 
+            : [recipient.expoPushToken];
+
           sendPushNotification(
-            [recipient.expoPushToken], 
+            finalTokens, 
             pushTitle,
             pushBody,
             { 
@@ -103,6 +104,7 @@ router.post("/messages", upload.single('image'), async (req, res) => {
     res.status(500).json({ error: "Failed to send message" });
   }
 });
+
 
 
 

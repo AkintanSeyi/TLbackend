@@ -6,6 +6,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const upload = require("./../middleware/upload");
 const imagekit = require("../middleware/imagekit");
+const mongoose = require("mongoose");
 const { sendEmail } = require("../middleware/sendemail"); 
 
 
@@ -18,6 +19,30 @@ const resetCodes = {};
 function generateResetCode() {
   return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
 }
+
+// Path: backend/routes/auth.js
+router.get('/user-profile/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params; // userId here is actually the email string
+    console.log("Checking profile for:", userId);
+
+    // FIX: Search by 'email' field instead of '_id'
+    const user = await User.findOne({ email: userId }).select('expoPushToken name email'); 
+    
+    if (!user) {
+      // If no user found, return success:true but with empty token so frontend continues
+      return res.status(200).json({ 
+        success: true, 
+        user: { expoPushToken: [] } 
+      }); 
+    }
+
+    res.status(200).json({ success: true, user });
+  } catch (error) {
+    console.error("BACKEND ERROR:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 
 // Route to save the push token to the user's document
