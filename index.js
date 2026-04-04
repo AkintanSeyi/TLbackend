@@ -60,6 +60,9 @@ app.use("/api/notifications", require("./routes/notification"));
 app.use("/api/groups", require("./routes/grouppost"));
 app.use("/api/message", require("./routes/conversation"));
 app.use("/api/payments", require("./routes/payment"));
+app.use("/api/moments", require("./routes/momentSchema"));
+
+
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 

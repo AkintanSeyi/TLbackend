@@ -26,17 +26,17 @@ router.get('/user-profile/:userId', async (req, res) => {
     const { userId } = req.params; // userId here is actually the email string
     console.log("Checking profile for:", userId);
 
-    // FIX: Search by 'email' field instead of '_id'
+    // FIX: Search by 'email' field instead of '_id' 
     const user = await User.findOne({ email: userId }).select('expoPushToken name email'); 
     
     if (!user) {
       // If no user found, return success:true but with empty token so frontend continues
       return res.status(200).json({ 
         success: true, 
-        user: { expoPushToken: [] } 
+        user: { expoPushToken: [] }  
       }); 
     }
-
+  
     res.status(200).json({ success: true, user });
   } catch (error) {
     console.error("BACKEND ERROR:", error);
