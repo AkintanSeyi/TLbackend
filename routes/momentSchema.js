@@ -52,6 +52,33 @@ router.post("/comment", async (req, res) => {
   }
 });
 
+router.post("/toggle-bookmark", async (req, res) => {
+  try {
+    const { userId, itemId, itemType } = req.body; // itemType: 'group' or 'moment'
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    // Determine which array to update
+    const field = itemType === 'moment' ? 'savedMoments' : 'savedPosts';
+    
+    const isBookmarked = user[field].includes(itemId);
+
+    if (isBookmarked) {
+      // Pull (Remove) from array
+      user[field].pull(itemId);
+    } else {
+      // Push (Add) to array
+      user[field].push(itemId);
+    }
+
+    await user.save();
+    res.status(200).json({ success: true, isBookmarked: !isBookmarked });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 router.post("/:momentId/like", async (req, res) => {
   try {
@@ -86,29 +113,35 @@ console.log("11111111111Hiiiiiiii")
 
 router.get("/user", async (req, res) => {
   try {
-    const { email } = req.query; // Accepting email instead of userId
-console.log(email)
+    const { email, type } = req.query; // 'type' can be 'posts' or 'tags'
+    
     if (!email) {
       return res.status(400).json({ success: false, message: "Email is required" });
     }
 
-    // 1. Find the user by email to get their ObjectId
     const user = await User.findOne({ email: email.toLowerCase() });
-    
-    
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // 2. Use the found user's _id to get their moments
-    const moments = await Moment.find({ 
-        author: user._id, 
-        
-      })
-      .select("mediaUrl caption createdAt") 
+    let query = {};
+
+    if (type === 'tags') {
+      // 1. GET TAGS: You are mentioned, but you are NOT the author
+      query = { 
+        mentions: user._id, 
+        author: { $ne: user._id } 
+      };
+    } else {
+      // 2. GET POSTS: You are the author
+      query = { author: user._id };
+    }
+
+    const moments = await Moment.find(query)
+      .populate("author", "name profileImage") // Important to see who tagged you
       .sort({ createdAt: -1 });
 
-    // 3. Map mediaUrl to 'image' so your frontend 'item.image' works
+    // Map mediaUrl to 'image' for your frontend compatibility
     const formattedMoments = moments.map(m => ({
       ...m._doc,
       image: m.mediaUrl 
@@ -164,6 +197,7 @@ router.get('/:id', async (req, res) => {
 
 
 router.get("/", async (req, res) => {
+     console.log("Supp")
   try {
     const { userId } = req.query;
 
@@ -198,36 +232,58 @@ router.get("/", async (req, res) => {
 router.post("/", upload.single("image"), async (req, res) => {
   try {
     // 1. Destructure fields from body
-    // Note: feelingName and feelingEmoji come as separate strings from FormData
-    const { author, caption, associatedGroup, feelingName, feelingEmoji } = req.body;
+    const { author, caption, associatedGroup, feelingName, feelingEmoji, mediaType } = req.body;
 
-    // Logs for debugging (matching your style)
     console.log("--- Creating New Moment ---");
     console.log("Author ID:", author);
-    console.log("Feeling:", feelingName, feelingEmoji);
+    console.log("Media Type:", mediaType);
     console.log("File Received:", req.file ? "Yes" : "No");
 
     // 2. Validation check
     if (!author || !req.file) {
       return res.status(400).json({ 
         success: false, 
-        message: "Author ID and an image are required to post a moment." 
+        message: "Author ID and a media file are required." 
       });
     }
+
+    // --- NEW: MENTION EXTRACTION LOGIC ---
+    // Extract @mentions from the caption
+   const mentionNames = caption ? caption.match(/@(\w+)/g) || [] : [];
+let mentionIds = [];
+
+if (mentionNames.length > 0) {
+  // Remove '@'
+  const cleanNames = mentionNames.map(name => name.substring(1));
+
+  // Find users where the name (ignoring spaces/case) matches the mention
+  const allUsers = await User.find({}).select('_id name');
+  
+  mentionIds = allUsers.filter(u => {
+    const formattedName = u.name.toLowerCase().replace(/\s/g, '');
+    return cleanNames.includes(formattedName);
+  }).map(u => u._id);
+}
+    // Also keeping hashtag extraction if present
+    const hashtags = caption ? caption.match(/#(\w+)/g) || [] : [];
+    // -------------------------------------
 
     // 3. Prepare Moment Data Object
     let momentData = {
       author,
       caption,
+      mediaType: mediaType || 'image',
       associatedGroup: associatedGroup || null,
-      // Nest the feelings into the object structure defined in the model
       feeling: {
         name: feelingName || "",
         emoji: feelingEmoji || ""
-      }
+      },
+      // Adding these to the object to be saved
+      mentions: mentionIds, 
+      tags: hashtags        
     };
 
-    // 4. Handle Image Upload via ImageKit
+    // 4. Handle Upload via ImageKit
     if (req.file) {
       const uploadResult = await imagekit.upload({
         file: req.file.buffer,
@@ -235,7 +291,6 @@ router.post("/", upload.single("image"), async (req, res) => {
         folder: "/moments",
       });
       
-      // Map ImageKit response to your schema fields
       momentData.mediaUrl = uploadResult.url;
       momentData.mediaId = uploadResult.fileId;
     }
@@ -244,9 +299,10 @@ router.post("/", upload.single("image"), async (req, res) => {
     const newMoment = new Moment(momentData);
     await newMoment.save();
 
-    // 6. Send Response
-    // We populate the author so the frontend gets the name/image immediately
-    const populatedMoment = await Moment.findById(newMoment._id).populate("author", "name profileImage");
+    // 6. Send Response (Populating mentions and using profilePicture as per your model)
+    const populatedMoment = await Moment.findById(newMoment._id)
+      .populate("author", "name profilePicture")
+      .populate("mentions", "name username profilePicture");
 
     res.status(201).json({
       success: true,

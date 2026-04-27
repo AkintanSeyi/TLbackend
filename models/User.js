@@ -23,8 +23,26 @@ const userSchema = new mongoose.Schema({
   interests: [{ type: String }],
   isProfileComplete: { type: Boolean, default: false },
   agreedToTerms: { type: Boolean, default: false },
+  // Inside your userSchema in User.js
+savedPosts: [{ 
+  type: mongoose.Schema.Types.ObjectId, 
+  ref: 'Group' // or 'Post' depending on your model name
+}],
+savedMoments: [{ 
+  type: mongoose.Schema.Types.ObjectId, 
+  ref: 'Moment' 
+}],
+followRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+followers: [{ 
+  type: mongoose.Schema.Types.ObjectId, 
+  ref: 'User' 
+}],
+following: [{ 
+  type: mongoose.Schema.Types.ObjectId, 
+  ref: 'User' 
+}],
 
-  // --- PUSH NOTIFICATIONS ---
+  // --- PUSH NOTIFICATIONS --- 
  expoPushToken: { 
   type: [String], 
   default: [] 

@@ -740,4 +740,77 @@ router.put("/update-group/:groupId/:userId", upload.single("profilePicture"), as
   }
 });
 
+// routes/userRoutes.js or similar
+router.post("/toggle-bookmark", async (req, res) => {
+   console.log("3Suppppp")
+  try {
+    const { userId, itemId, itemType } = req.body; // itemType: 'group' or 'moment'
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    // Determine which array to update
+    const field = itemType === 'moment' ? 'savedMoments' : 'savedPosts';
+    
+    const isBookmarked = user[field].includes(itemId);
+
+    if (isBookmarked) {
+      // Pull (Remove) from array
+      user[field].pull(itemId);
+    } else {
+      // Push (Add) to array
+      user[field].push(itemId);
+    }
+
+    await user.save();
+    console.log("Suppppp")
+    res.status(200).json({ success: true, isBookmarked: !isBookmarked });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// router.post("/toggle-follow", ...)
+
+router.post("/users/toggle-follow", async (req, res) => {
+  try {
+    const { userId, targetUserId } = req.body; 
+
+    if (userId === targetUserId) {
+      return res.status(400).json({ success: false, message: "You cannot follow yourself" });
+    }
+
+    const currentUser = await User.findById(userId);
+    const targetUser = await User.findById(targetUserId);
+
+    if (!currentUser || !targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const isFollowing = currentUser.following.includes(targetUserId);
+
+    if (isFollowing) {
+      // Unfollow: Remove target from my 'following' and me from their 'followers'
+      currentUser.following.pull(targetUserId);
+      targetUser.followers.pull(userId);
+    } else {
+      // Follow: Add target to my 'following' and me from their 'followers'
+      currentUser.following.push(targetUserId);
+      targetUser.followers.push(userId);
+    }
+
+    await currentUser.save();
+    await targetUser.save();
+
+    res.status(200).json({ 
+      success: true, 
+      isFollowing: !isFollowing,
+      followerCount: targetUser.followers.length 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 module.exports = router;

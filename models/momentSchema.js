@@ -17,13 +17,17 @@ const momentSchema = new mongoose.Schema({
   // --- CONTENT --- 
   caption: { 
     type: String, 
-    trim: true, 
+    trim: true,  
     maxlength: [2200, "Caption is too long"] 
   },
-  mediaUrl: { 
-    type: String, 
-    required: [true, "Media URL is required"] 
-  },
+  // Add mediaType to your schema 
+  mediaUrl: { type: String, required: true },
+mediaType: { 
+  type: String, 
+  enum: ['image', 'video'], 
+  default: 'image',
+  required: true 
+},
   mediaId: { 
     type: String, 
     required: true // For management in your storage bucket (Cloudinary/S3)
@@ -51,6 +55,10 @@ const momentSchema = new mongoose.Schema({
   },
   tags: [{ 
     type: String 
+  }],
+  mentions: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User' 
   }]
 }, { timestamps: true });
 

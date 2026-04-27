@@ -24,9 +24,9 @@ function generateResetCode() {
 router.get('/user-profile/:userId', async (req, res) => {
   try {
     const { userId } = req.params; // userId here is actually the email string
-    console.log("Checking profile for:", userId);
-
-    // FIX: Search by 'email' field instead of '_id' 
+    console.log("Checking profile for:", userId);   
+  
+    // FIX: Search by 'email' field instead of '_id'  
     const user = await User.findOne({ email: userId }).select('expoPushToken name email'); 
     
     if (!user) {
@@ -450,12 +450,13 @@ router.patch("/complete-profile", upload.single("profileImage"), async (req, res
 });
 
 
-router.get("/user-profile/:email", async (req, res) => {
+router.get("/user-profile/user/:email", async (req, res) => {
+     console.log("Hiiii")
   try {
     const user = await User.findOne({ email: req.params.email.toLowerCase() });
     console.log(user)
     if (!user) return res.status(404).json({ message: "User not found" });
-    
+    console.log("Hiiii")
     res.status(200).json({ success: true, user });
   } catch (error) {
     res.status(500).json({ message: "Server error" });
@@ -581,6 +582,23 @@ router.post("/delete-account", async (req, res) => {
   } catch (error) {
     console.error("Delete Account Error:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+
+router.get("/search-users", async (req, res) => {
+  const { query } = req.query;
+  try {
+    const users = await User.find({
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { email: { $regex: query, $options: "i" } }
+      ]
+    }).select("name profileImage email bio"); // Only return what's needed
+
+    res.status(200).json({ success: true, users });
+  } catch (error) {
+    res.status(500).json({ message: "Error searching users" });
   }
 });
 
